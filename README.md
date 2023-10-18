@@ -1,3 +1,7 @@
 # ZeroTrust Swarm Network - Common Libraries
 
-TBA
+Common libraries in `ZSN`
+
+## Crates
+
+- [zsn-logging](https://crates.io/crates/zsn-logging)

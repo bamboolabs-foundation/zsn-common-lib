@@ -1,0 +1,19 @@
+[package]
+name = "zsn-logging"
+description = "ZSN - Logging"
+publish = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+default = ["env_logger"]  # only use this for binary/app target
+wasm32 = ["gloo-console"] # wasm32-unknown-emscripten/wasm32-unknown-unknown
+
+[dependencies]
+env_logger = { workspace = true, optional = true }
+gloo-console = { workspace = true, optional = true }
+log.workspace = true
+serde.workspace = true
