@@ -4,4 +4,5 @@ Common libraries in `ZSN`
 
 ## Crates
 
-- [zsn-logging](https://crates.io/crates/zsn-logging)
+- [zsn-logging](crates/logging/README.md)
+- [zsn-crypto-id](crates/cryptographic-identity/README.md)

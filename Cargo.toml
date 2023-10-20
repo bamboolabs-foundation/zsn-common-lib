@@ -11,18 +11,56 @@ version = "0.1.0"
 
 [workspace]
 resolver = "2"
-members = ["crates/logging"]
+members = ["crates/cryptographic-identity", "crates/logging"]
 
 [patch.crates-io]
-ss58-registry = { git = "https://github.com/bamboolabs-foundation/ss58-registry", rev = "d9f85a4" }
+ss58-registry = { git = "https://github.com/bamboolabs-foundation/ss58-registry", rev = "b558f60" }
 
 [workspace.dependencies]
+arrayvec = { version = "0.7.4", default-features = false, features = ["serde", "zeroize"] }
+bitvec = { version = "1.0.1", default-features = false, features = ["atomic", "serde"] }
+blake2 = { version = "0.10.6", default-features = false }
+blake3 = { version = "1.5.0", default-features = false, features = ["digest", "serde", "zeroize"] }
+bs58 = { version = "0.5.0", default-features = false }
+curve25519-dalek = { version = "4.1.1", default-features = false, features = [
+    "digest",
+    "ff",
+    "group-bits",
+    "precomputed-tables",
+    "rand_core",
+    "serde",
+    "zeroize",
+] }
+ed25519-dalek = { version = "2.0.0", default-features = false, features = [
+    "digest",
+    "fast",
+    "rand_core",
+    "serde",
+    "signature",
+    "zeroize",
+] }
 env_logger = "0.10.0"
+getrandom = "0.2.10"
 gloo-console = "0.3.0"
+hex = { version = "0.4.3", default-features = false, features = ["serde"] }
+itertools = { version = "0.11.0", default-features = false }
 log = { version = "0.4.20", default-features = false, features = [
     "max_level_debug",
     "release_max_level_info",
     "serde",
 ] }
+parity-scale-codec = { version = "3.6.5", default-features = false, features = [
+    "bit-vec",
+    "bytes",
+    "chain-error",
+    "derive",
+    "generic-array",
+    "max-encoded-len",
+    "serde",
+] }
+pbkdf2 = { version = "0.12.2", features = ["simple"] }
 serde = { version = "1.0.189", default-features = false, features = ["derive"] }
-ss58-registry = { git = "https://github.com/bamboolabs-foundation/ss58-registry", rev = "d9f85a4", default-features = false }
+sha2 = { version = "0.10.8", default-features = false }
+ss58-registry = { git = "https://github.com/bamboolabs-foundation/ss58-registry", rev = "b558f60", default-features = false }
+thiserror-no-std = "2.0.2"
+zeroize = { version = "1.6.0", default-features = false, features = ["derive", "serde"] }

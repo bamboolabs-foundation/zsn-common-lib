@@ -1,0 +1,58 @@
+[package]
+name = "zsn-crypto-id"
+description = "ZSN - Cryptographic Identity"
+publish = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[features]
+default = []
+std = [
+    "arrayvec/std",
+    "bitvec/std",
+    "blake2/std",
+    "blake3/std",
+    "bs58/std",
+    "ed25519-dalek/std",
+    "getrandom/std",
+    "hex/std",
+    "itertools/use_std",
+    "parity-scale-codec/std",
+    "pbkdf2/std",
+    "serde/std",
+    "sha2/std",
+    "ss58-registry/std",
+    "thiserror-no-std/std",
+    "zeroize/std",
+]
+wasm32 = ["std", "blake3/pure", "getrandom/js"]
+opt-aarch64 = ["std", "blake3/neon", "ed25519-dalek/asm", "sha2/asm", "zeroize/aarch64"]
+opt-intel = ["std", "ed25519-dalek/asm", "getrandom/rdrand", "sha2/asm"]
+
+[dependencies]
+arrayvec.workspace = true
+bitvec.workspace = true
+blake2.workspace = true
+blake3.workspace = true
+bs58.workspace = true
+curve25519-dalek.workspace = true
+ed25519-dalek.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+itertools.workspace = true
+parity-scale-codec.workspace = true
+pbkdf2.workspace = true
+serde.workspace = true
+sha2.workspace = true
+ss58-registry.workspace = true
+thiserror-no-std.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+hex = { workspace = true, features = ["std"] }
+sp-core = "24.0.0"
+test-case = "3.2.1"
+tiny-bip39 = "1.0.0"

@@ -9,7 +9,9 @@ repository.workspace = true
 version.workspace = true
 
 [features]
-default = ["env_logger"]  # only use this for binary/app target
+default = []
+std = []
+main = ["env_logger"]     # only use this for binary/app target
 wasm32 = ["gloo-console"] # wasm32-unknown-emscripten/wasm32-unknown-unknown
 
 [dependencies]
