@@ -16,7 +16,8 @@ std = [
     "blake2/std",
     "blake3/std",
     "bs58/std",
-    "ed25519-dalek/std",
+    "digest/std",
+    "ed25519-compact/std",
     "getrandom/std",
     "hex/std",
     "itertools/use_std",
@@ -29,8 +30,8 @@ std = [
     "zeroize/std",
 ]
 wasm32 = ["std", "blake3/pure", "getrandom/js"]
-opt-aarch64 = ["std", "blake3/neon", "ed25519-dalek/asm", "sha2/asm", "zeroize/aarch64"]
-opt-intel = ["std", "ed25519-dalek/asm", "getrandom/rdrand", "sha2/asm"]
+opt-aarch64 = ["std", "blake3/neon", "sha2/asm", "zeroize/aarch64"]
+opt-intel = ["std", "getrandom/rdrand", "sha2/asm"]
 
 [dependencies]
 arrayvec.workspace = true
@@ -39,7 +40,8 @@ blake2.workspace = true
 blake3.workspace = true
 bs58.workspace = true
 curve25519-dalek.workspace = true
-ed25519-dalek.workspace = true
+digest.workspace = true
+ed25519-compact.workspace = true
 getrandom.workspace = true
 hex.workspace = true
 itertools.workspace = true
@@ -49,6 +51,7 @@ serde.workspace = true
 sha2.workspace = true
 ss58-registry.workspace = true
 thiserror-no-std.workspace = true
+typenum.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

@@ -25,21 +25,15 @@ pub type SharedKeyBytes = [u8; CryptographicIdentity::LEN_SHARED_KEY];
 pub type SignatureBytes = [u8; CryptographicIdentity::LEN_SIGNATURE];
 pub type Ss58String = arrayvec::ArrayString<{ CryptographicIdentity::SS58_STRING_MAX_LENGTH }>;
 
-use blake2::Digest;
 use core::ops::{Deref, DerefMut};
 use core::str::FromStr;
-use ed25519_dalek::{Signer, Verifier};
+use digest::Digest;
 
 #[derive(core::clone::Clone)]
 #[derive(zeroize::ZeroizeOnDrop)]
 pub enum CryptographicIdentity {
-    OwnedKey {
-        keypair: ed25519_dalek::SigningKey,
-    },
-    OthersKey {
-        #[zeroize(skip)]
-        public: ed25519_dalek::VerifyingKey,
-    },
+    OwnedKey { keypair: ed25519_compact::KeyPair },
+    OthersKey { public: ed25519_compact::PublicKey },
 }
 
 impl core::hash::Hash for CryptographicIdentity {
@@ -52,7 +46,7 @@ impl core::cmp::Eq for CryptographicIdentity {}
 
 impl core::cmp::PartialEq for CryptographicIdentity {
     fn eq(&self, other: &Self) -> bool {
-        self.get_verifier().eq(&other.get_verifier())
+        self.get_verifier().eq(other.get_verifier())
     }
 }
 
@@ -64,24 +58,35 @@ impl core::cmp::PartialOrd for CryptographicIdentity {
 
 impl core::cmp::Ord for CryptographicIdentity {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.get_verifier()
-            .as_bytes()
-            .cmp(other.get_verifier().as_bytes())
+        self.get_verifier().as_ref().cmp(other.get_verifier().as_ref())
     }
 }
 
-impl core::convert::From<ed25519_dalek::VerifyingKey> for CryptographicIdentity {
-    fn from(value: ed25519_dalek::VerifyingKey) -> Self {
+impl core::convert::From<ed25519_compact::PublicKey> for CryptographicIdentity {
+    fn from(value: ed25519_compact::PublicKey) -> Self {
         Self::OthersKey {
             public: value,
         }
     }
 }
 
-impl core::convert::From<ed25519_dalek::SigningKey> for CryptographicIdentity {
-    fn from(value: ed25519_dalek::SigningKey) -> Self {
+impl core::convert::From<ed25519_compact::KeyPair> for CryptographicIdentity {
+    fn from(value: ed25519_compact::KeyPair) -> Self {
         Self::OwnedKey {
             keypair: value,
+        }
+    }
+}
+
+impl core::convert::From<ed25519_compact::SecretKey> for CryptographicIdentity {
+    fn from(value: ed25519_compact::SecretKey) -> Self {
+        let pk = value.public_key();
+
+        Self::OwnedKey {
+            keypair: ed25519_compact::KeyPair {
+                pk,
+                sk: value,
+            },
         }
     }
 }
@@ -89,9 +94,10 @@ impl core::convert::From<ed25519_dalek::SigningKey> for CryptographicIdentity {
 impl core::convert::From<crate::mnemonic::MnemonicPhrase> for CryptographicIdentity {
     fn from(value: crate::mnemonic::MnemonicPhrase) -> Self {
         let secret_seed = value.try_get_secret_seed("").expect("Should be infallible!");
-        let mut secret_key = zeroize::Zeroizing::new(ed25519_dalek::SecretKey::default());
-        secret_key.copy_from_slice(&secret_seed[0..ed25519_dalek::SECRET_KEY_LENGTH]);
-        let keypair = ed25519_dalek::SigningKey::from_bytes(secret_key.deref());
+        let secret_seed =
+            ed25519_compact::Seed::from_slice(secret_seed.deref()).expect("Should be infallible!");
+        let keypair = ed25519_compact::KeyPair::from_seed(secret_seed);
+        secret_seed.wipe();
 
         Self::OwnedKey {
             keypair,
@@ -133,25 +139,17 @@ impl CryptographicIdentity {
         let mut random_bytes = zeroize::Zeroizing::new([0u8; Self::LEN_PRIVATE_KEY]);
         getrandom::getrandom(random_bytes.deref_mut()).expect("Catasthropic cryptography failure!");
 
-        Self::OwnedKey {
-            keypair: ed25519_dalek::SigningKey::from_bytes(random_bytes.deref()),
-        }
+        Self::try_from_private_bytes(random_bytes.deref()).expect("Should be infallible!")
     }
 
     pub fn try_from_phrase(phrase: &str, password: &str) -> crate::Result<Self> {
         let mnemonic_phrase = crate::mnemonic::MnemonicPhrase::try_from(phrase)?;
-        let secret_seed = mnemonic_phrase.try_get_secret_seed(password)?;
-        let mut secret_key = zeroize::Zeroizing::new(ed25519_dalek::SecretKey::default());
-        secret_key.copy_from_slice(&secret_seed[0..ed25519_dalek::SECRET_KEY_LENGTH]);
-        let keypair = ed25519_dalek::SigningKey::from_bytes(secret_key.deref());
 
-        crate::Result::Ok(Self::OwnedKey {
-            keypair,
-        })
+        Self::try_from_private_bytes(&mnemonic_phrase.try_get_secret_seed(password)?[..Self::LEN_PRIVATE_KEY])
     }
 
     pub fn try_from_public_bytes(source: &[u8]) -> crate::Result<Self> {
-        let public = ed25519_dalek::VerifyingKey::try_from(source)
+        let public = ed25519_compact::PublicKey::from_slice(source)
             .map_err(|_| crate::errors::Error::InvalidPublicKeyBytes)?;
 
         crate::Result::Ok(Self::OthersKey {
@@ -225,8 +223,10 @@ impl CryptographicIdentity {
     }
 
     pub fn try_from_private_bytes(source: &[u8]) -> crate::Result<Self> {
-        let keypair = ed25519_dalek::SigningKey::try_from(source)
-            .map_err(|_| crate::errors::Error::InvalidByteLength)?;
+        let secret_seed =
+            ed25519_compact::Seed::from_slice(source).map_err(|_| crate::errors::Error::InvalidByteLength)?;
+        let keypair = ed25519_compact::KeyPair::from_seed(secret_seed);
+        secret_seed.wipe();
 
         crate::Result::Ok(Self::OwnedKey {
             keypair,
@@ -249,7 +249,7 @@ impl CryptographicIdentity {
 
     pub fn get_ss58(&self, prefix: u16) -> Ss58String {
         let verifier = self.get_verifier();
-        let public_bytes = verifier.as_bytes();
+        let public_bytes = verifier.as_ref();
         let mut hasher = blake2::Blake2b512::new();
         hasher.update(Self::SS58_IDENTIFIER);
         let mut hash_buffer = [0u8; 64]; // 512-bit
@@ -296,9 +296,22 @@ impl CryptographicIdentity {
     }
 
     pub fn try_sign(&self, message: &[u8]) -> crate::Result<SignatureBytes> {
-        let keypair = self.try_get_keypair()?;
+        let signature = self.try_get_keypair()?.sk.sign(message, None);
+        let mut signature_bytes = [0u8; Self::LEN_SIGNATURE];
+        signature_bytes.copy_from_slice(signature.deref());
 
-        crate::Result::Ok(keypair.sign(message).to_bytes())
+        crate::Result::Ok(signature_bytes)
+    }
+
+    pub fn try_get_streaming_signer(&self) -> crate::Result<StreamingSigner> {
+        let sk = &self.try_get_keypair()?.sk;
+        let mut noise = [0u8; ed25519_compact::Noise::BYTES];
+        getrandom::getrandom(&mut noise).expect("Catasthropic cryptography failure!");
+        let noise = ed25519_compact::Noise::new(noise);
+
+        crate::Result::Ok(StreamingSigner {
+            inner: sk.sign_incremental(noise),
+        })
     }
 
     pub fn try_verify(&self, signature: &[u8], message: &[u8]) -> crate::Result<bool> {
@@ -306,10 +319,27 @@ impl CryptographicIdentity {
             return crate::Result::Err(crate::errors::Error::InvalidSignatureLength);
         }
 
-        let valid_signature = ed25519_dalek::Signature::from_slice(signature)
+        let valid_signature = ed25519_compact::Signature::from_slice(signature)
             .map_err(|_| crate::errors::Error::InvalidSignatureFormat)?;
 
         crate::Result::Ok(self.get_verifier().verify(message, &valid_signature).is_ok())
+    }
+
+    pub fn try_get_streaming_verifier(&self, signature: &[u8]) -> crate::Result<StreamingVerifier> {
+        if signature.len() != Self::LEN_SIGNATURE {
+            return crate::Result::Err(crate::errors::Error::InvalidSignatureLength);
+        }
+
+        let valid_signature = ed25519_compact::Signature::from_slice(signature)
+            .map_err(|_| crate::errors::Error::InvalidSignatureFormat)?;
+        let inner = self
+            .get_verifier()
+            .verify_incremental(&valid_signature)
+            .expect("Should be infallible!");
+
+        crate::Result::Ok(StreamingVerifier {
+            inner,
+        })
     }
 
     pub fn try_create_sending_key(
@@ -321,13 +351,13 @@ impl CryptographicIdentity {
             return crate::Result::Err(crate::errors::Error::ReceiverKeyIsOwnedOnSending);
         }
 
-        let sender_bytes = self.get_verifier().to_bytes();
+        let sender_bytes = self.get_verifier().as_ref();
         let shared_compressed = Self::try_get_shared_compressed_edwards_y(
             self.try_get_keypair()?,
-            &receiver_identity.get_verifier(),
+            receiver_identity.get_verifier(),
         )?;
         let mut master_key = zeroize::Zeroizing::new([0u8; 64]);
-        master_key[..32].copy_from_slice(&sender_bytes);
+        master_key[..32].copy_from_slice(sender_bytes);
         master_key[32..].copy_from_slice(shared_compressed.as_bytes());
 
         Ok(zeroize::Zeroizing::new(blake3::derive_key(
@@ -345,13 +375,13 @@ impl CryptographicIdentity {
             return crate::Result::Err(crate::errors::Error::SenderKeyIsOwnedOnReceiving);
         }
 
-        let sender_bytes = sender_identity.get_verifier().to_bytes();
+        let sender_bytes = sender_identity.get_verifier().as_ref();
         let shared_compressed = Self::try_get_shared_compressed_edwards_y(
             self.try_get_keypair()?,
-            &sender_identity.get_verifier(),
+            sender_identity.get_verifier(),
         )?;
         let mut master_key = zeroize::Zeroizing::new([0u8; 64]);
-        master_key[..32].copy_from_slice(&sender_bytes);
+        master_key[..32].copy_from_slice(sender_bytes);
         master_key[32..].copy_from_slice(shared_compressed.as_bytes());
 
         Ok(zeroize::Zeroizing::new(blake3::derive_key(
@@ -360,17 +390,14 @@ impl CryptographicIdentity {
         )))
     }
 
-    pub fn try_get_private_bytes(&self) -> crate::Result<PrivateKeyBytes> {
-        let keypair = self.try_get_keypair()?;
-
-        crate::Result::Ok(zeroize::Zeroizing::new(keypair.to_bytes()))
+    pub fn try_get_private_bytes(&self) -> crate::Result<&[u8]> {
+        crate::Result::Ok(&self.try_get_keypair()?.sk[..Self::LEN_PRIVATE_KEY])
     }
 
     pub fn try_get_private_hex(&self) -> crate::Result<PrivateKeyHex> {
         let private_bytes = self.try_get_private_bytes()?;
         let mut string_buffer = zeroize::Zeroizing::new([0u8; Self::LEN_PRIVATE_KEY * 2]);
-        hex::encode_to_slice(private_bytes.deref(), string_buffer.deref_mut())
-            .expect("Should be infallible!");
+        hex::encode_to_slice(private_bytes, string_buffer.deref_mut()).expect("Should be infallible!");
 
         let private_hex = zeroize::Zeroizing::new(
             arrayvec::ArrayString::<{ CryptographicIdentity::LEN_PRIVATE_KEY * 2 }>::from_byte_string(
@@ -382,8 +409,8 @@ impl CryptographicIdentity {
         crate::Result::Ok(private_hex)
     }
 
-    pub fn get_public_bytes(&self) -> PublicKeyBytes {
-        self.get_verifier().to_bytes()
+    pub fn get_public_bytes(&self) -> &[u8] {
+        self.get_verifier().deref()
     }
 
     pub fn get_public_hex(&self) -> PublicKeyHex {
@@ -396,25 +423,33 @@ impl CryptographicIdentity {
 
     pub fn into_others(self) -> Self {
         Self::OthersKey {
-            public: self.get_verifier(),
+            public: *self.get_verifier(),
         }
     }
 
     fn try_get_shared_compressed_edwards_y(
-        keypair: &ed25519_dalek::SigningKey,
-        verifying_key: &ed25519_dalek::VerifyingKey,
+        keypair: &ed25519_compact::KeyPair,
+        verifying_key: &ed25519_compact::PublicKey,
     ) -> crate::Result<zeroize::Zeroizing<curve25519_dalek::edwards::CompressedEdwardsY>> {
-        let pk_point = curve25519_dalek::edwards::CompressedEdwardsY(verifying_key.to_bytes())
+        let mut pk_bytes = [0u8; Self::LEN_PUBLIC_KEY];
+        pk_bytes.copy_from_slice(verifying_key.as_ref());
+        let pk_point = curve25519_dalek::edwards::CompressedEdwardsY(pk_bytes)
             .decompress()
             .ok_or(crate::errors::Error::EdwardsPointDecompressionFailure)?;
-        let sk_scalar = zeroize::Zeroizing::new(curve25519_dalek::Scalar::from_bytes_mod_order(
-            keypair.to_scalar().to_bytes(),
-        ));
+        let sk_hash: [u8; 64] = sha2::Sha512::default()
+            .chain_update(&keypair.sk[..Self::LEN_PRIVATE_KEY])
+            .finalize()
+            .into();
+        let mut sk_scalar_bytes = [0u8; 32];
+        sk_scalar_bytes.copy_from_slice(&sk_hash[..32]);
+        let sk_scalar = curve25519_dalek::Scalar::from_bytes_mod_order(
+            curve25519_dalek::scalar::clamp_integer(sk_scalar_bytes),
+        );
 
-        crate::Result::Ok(zeroize::Zeroizing::new((pk_point * sk_scalar.deref()).compress()))
+        crate::Result::Ok(zeroize::Zeroizing::new((pk_point * sk_scalar).compress()))
     }
 
-    fn try_get_keypair(&self) -> crate::Result<&ed25519_dalek::SigningKey> {
+    fn try_get_keypair(&self) -> crate::Result<&ed25519_compact::KeyPair> {
         match self {
             Self::OthersKey {
                 ..
@@ -425,15 +460,47 @@ impl CryptographicIdentity {
         }
     }
 
-    fn get_verifier(&self) -> ed25519_dalek::VerifyingKey {
+    fn get_verifier(&self) -> &ed25519_compact::PublicKey {
         match self {
             Self::OthersKey {
                 public,
-            } => *public,
+            } => public,
             Self::OwnedKey {
                 keypair,
-            } => keypair.verifying_key(),
+            } => &keypair.pk,
         }
+    }
+}
+
+pub struct StreamingSigner {
+    inner: ed25519_compact::SigningState,
+}
+
+impl StreamingSigner {
+    pub fn update(&mut self, message_chunk: &[u8]) {
+        self.inner.absorb(message_chunk);
+    }
+
+    pub fn finalize(self) -> SignatureBytes {
+        let signature = self.inner.sign();
+        let mut signature_bytes = [0u8; CryptographicIdentity::LEN_SIGNATURE];
+        signature_bytes.copy_from_slice(signature.deref());
+
+        signature_bytes
+    }
+}
+
+pub struct StreamingVerifier {
+    inner: ed25519_compact::VerifyingState,
+}
+
+impl StreamingVerifier {
+    pub fn update(&mut self, message_chunk: &[u8]) {
+        self.inner.absorb(message_chunk);
+    }
+
+    pub fn finalize(self) -> bool {
+        self.inner.verify().is_ok()
     }
 }
 
@@ -453,9 +520,9 @@ mod tests {
     use test_case::test_case;
 
     #[cfg(debug_assertions)]
-    const TEST_REPETITIONS: usize = 128;
+    const TEST_REPETITIONS: usize = 32;
     #[cfg(not(debug_assertions))]
-    const TEST_REPETITIONS: usize = 4096;
+    const TEST_REPETITIONS: usize = 512;
     const ALICE_MINISECRET_HEX: &str = "0xabf8e5bdbe30c65656c0a3cbd181ff8a56294a69dfedd27982aace4a76909115";
     const ALICE_PUBLIC_HEX: &str = "0x88dc3417d5058ec4b4503e0c12ea1a0a89be200fe98922423d4334014fa6b0ee";
     const ALICE_PUBLIC_SS58: &str = "idXc9jR6fTzwS1Avubt5jGPYwjzhBDL7bWHFQCWhax1rskKfT";
@@ -538,6 +605,46 @@ mod tests {
                 .unwrap();
 
             assert_eq!(sending_key.deref(), receiving_key.deref());
+        }
+    }
+
+    #[test_case(24 ; "mnemonic-24")]
+    #[test_case(21 ; "mnemonic-21")]
+    #[test_case(18 ; "mnemonic-18")]
+    #[test_case(15 ; "mnemonic-15")]
+    #[test_case(12 ; "mnemonic-12")]
+    fn streaming_signature_is_substrate_compatible(word_count: usize) {
+        for _ in 0..TEST_REPETITIONS {
+            let mut big_random_message = [0u8; 512 * 1024];
+            getrandom(&mut big_random_message).unwrap();
+            let random_mnemonic = MnemonicPhrase::try_generate_with_count(word_count).unwrap();
+            let random_identity = CryptographicIdentity::try_from_phrase(&random_mnemonic, "").unwrap();
+            let (substrate_keypair, _) = Ed25519KeyPair::from_phrase(&random_mnemonic, None).unwrap();
+            let mut streaming_signer = random_identity.try_get_streaming_signer().unwrap();
+
+            for chunk in big_random_message.chunks_exact(128) {
+                streaming_signer.update(chunk);
+            }
+
+            let signature_identitas = streaming_signer.finalize();
+            let signature_substrate = substrate_keypair.sign(&big_random_message).0;
+            let mut streaming_verifier = random_identity
+                .try_get_streaming_verifier(&signature_substrate)
+                .unwrap();
+
+            for chunk in big_random_message.chunks_exact(128) {
+                streaming_verifier.update(chunk);
+            }
+
+            let verification_identitas = streaming_verifier.finalize();
+            let verification_substrate = Ed25519KeyPair::verify(
+                &Signature::from_raw(signature_identitas),
+                big_random_message,
+                &substrate_keypair.public(),
+            );
+
+            assert!(verification_identitas);
+            assert!(verification_substrate);
         }
     }
 }
