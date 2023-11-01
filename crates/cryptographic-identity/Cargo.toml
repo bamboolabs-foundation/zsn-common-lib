@@ -18,6 +18,7 @@ std = [
     "bs58/std",
     "digest/std",
     "ed25519-compact/std",
+    "ed25519-dalek/std",
     "getrandom/std",
     "hex/std",
     "itertools/use_std",
@@ -42,6 +43,7 @@ bs58.workspace = true
 curve25519-dalek.workspace = true
 digest.workspace = true
 ed25519-compact.workspace = true
+ed25519-dalek.workspace = true
 getrandom.workspace = true
 hex.workspace = true
 itertools.workspace = true

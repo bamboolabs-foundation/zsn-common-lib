@@ -28,6 +28,7 @@ pub type Ss58String = arrayvec::ArrayString<{ CryptographicIdentity::SS58_STRING
 use core::ops::{Deref, DerefMut};
 use core::str::FromStr;
 use digest::Digest;
+use zeroize::Zeroize;
 
 #[derive(core::clone::Clone)]
 #[derive(zeroize::ZeroizeOnDrop)]
@@ -303,6 +304,21 @@ impl CryptographicIdentity {
         crate::Result::Ok(signature_bytes)
     }
 
+    pub fn try_sign_digest<D: digest::Digest<OutputSize = typenum::U64>>(
+        &self,
+        digest: D,
+        context: Option<&[u8]>,
+    ) -> crate::Result<SignatureBytes> {
+        let mut seed = self.try_get_keypair()?.sk.seed();
+        let sk_dalek = ed25519_dalek::SigningKey::from_bytes(seed.deref());
+        let signature = sk_dalek
+            .sign_prehashed(digest, context)
+            .expect("Catasthropic cryptography failure!");
+        seed.zeroize();
+
+        crate::Result::Ok(signature.to_bytes())
+    }
+
     pub fn try_get_streaming_signer(&self) -> crate::Result<StreamingSigner> {
         let sk = &self.try_get_keypair()?.sk;
         let mut noise = [0u8; ed25519_compact::Noise::BYTES];
@@ -323,6 +339,29 @@ impl CryptographicIdentity {
             .map_err(|_| crate::errors::Error::InvalidSignatureFormat)?;
 
         crate::Result::Ok(self.get_verifier().verify(message, &valid_signature).is_ok())
+    }
+
+    pub fn try_verify_digest<D: digest::Digest<OutputSize = typenum::U64>>(
+        &self,
+        digest: D,
+        signature: &[u8],
+        context: Option<&[u8]>,
+    ) -> crate::Result<bool> {
+        if signature.len() != Self::LEN_SIGNATURE {
+            return crate::Result::Err(crate::errors::Error::InvalidSignatureLength);
+        }
+
+        let valid_signature = ed25519_dalek::Signature::from_slice(signature)
+            .map_err(|_| crate::errors::Error::InvalidSignatureFormat)?;
+        let pk_bytes = self.get_verifier().deref();
+        let pk_dalek =
+            ed25519_dalek::VerifyingKey::from_bytes(pk_bytes).expect("Catasthropic cryptography failure!");
+
+        crate::Result::Ok(
+            pk_dalek
+                .verify_prehashed(digest, context, &valid_signature)
+                .is_ok(),
+        )
     }
 
     pub fn try_get_streaming_verifier(&self, signature: &[u8]) -> crate::Result<StreamingVerifier> {
@@ -512,7 +551,9 @@ mod tests {
     use crate::mnemonic::MnemonicPhrase;
     use alloc::format;
     use alloc::string::ToString;
+    use digest::Digest;
     use getrandom::getrandom;
+    use sha2::Sha512;
     use sp_core::crypto::{AccountId32, Ss58Codec};
     use sp_core::ed25519::{Pair as Ed25519KeyPair, Signature};
     use sp_core::Pair;
@@ -645,6 +686,33 @@ mod tests {
 
             assert!(verification_identitas);
             assert!(verification_substrate);
+        }
+    }
+
+    #[test_case(24 ; "mnemonic-24")]
+    #[test_case(21 ; "mnemonic-21")]
+    #[test_case(18 ; "mnemonic-18")]
+    #[test_case(15 ; "mnemonic-15")]
+    #[test_case(12 ; "mnemonic-12")]
+    fn digest_signature_is_verifiable(word_count: usize) {
+        for _ in 0..TEST_REPETITIONS {
+            let mut random_message = [0u8; 1024];
+            getrandom(&mut random_message).unwrap();
+            let random_mnemonic = MnemonicPhrase::try_generate_with_count(word_count).unwrap();
+            let random_identity_owned = CryptographicIdentity::try_from_phrase(&random_mnemonic, "").unwrap();
+            let random_identity_others = random_identity_owned.clone().into_others();
+            let mut digest = Sha512::new();
+            digest.update(random_message);
+            let signature = random_identity_owned
+                .try_sign_digest(digest, Some(b"ZSN Context"))
+                .unwrap();
+            let mut digest = Sha512::new();
+            digest.update(random_message);
+            let verification_result = random_identity_others
+                .try_verify_digest(digest, &signature, Some(b"ZSN Context"))
+                .unwrap();
+
+            assert!(verification_result);
         }
     }
 }
