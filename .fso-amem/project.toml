@@ -1,0 +1,6 @@
+[project]
+name = "bamboo-zsn-common-lib"
+slug = "bamboo-zsn-common-lib"
+
+[amem]
+server = "https://amem.flusci.org"
